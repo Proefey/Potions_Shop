@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from src.api import auth
 from enum import Enum
@@ -106,6 +106,7 @@ class CartCheckout(BaseModel):
 @router.post("/{cart_id}/checkout")
 def checkout(cart_id: int, cart_checkout: CartCheckout):
     """ """
+    #Subtract Potions, Add Gold
     num_green_potion = 0
     gold = 0
     with db.engine.begin() as connection:
