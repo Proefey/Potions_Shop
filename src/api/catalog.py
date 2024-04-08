@@ -22,6 +22,6 @@ def get_catalog():
                 "name": "green potion",
                 "quantity": num_green_potion,
                 "price": 50,
-                "potion_type": [100, 0, 0, 0],
+                "potion_type": [0, 100, 0, 0],
             }
         ]
