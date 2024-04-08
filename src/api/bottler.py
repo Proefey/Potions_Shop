@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends
 from enum import Enum
 from pydantic import BaseModel
 from src.api import auth
+import sqlalchemy
+from src import database as db
 
 router = APIRouter(
     prefix="/bottler",
@@ -31,11 +33,24 @@ def get_bottle_plan():
     # Expressed in integers from 1 to 100 that must sum up to 100.
 
     # Initial logic: bottle all barrels into red potions.
+    num_green_potion = 0
+    num_green_ml = 0
+    with db.engine.begin() as connection:
+        result = connection.execute(sqlalchemy.text("SELECT * FROM global_inventory"))
+        for row in result:
+            num_green_potion = row[2]
+            num_green_ml = row[3]
+    num_green_potion_add = int(num_green_ml / 100)
+    num_green_potion += num_green_potion_add
+    num_green_ml -= int(num_green_ml / 100) * 100
+    with db.engine.begin() as connection:
+        connection.execute(sqlalchemy.text("UPDATE global_inventory SET num_green_potions = :num"), {'num': num_green_potion})
+        connection.execute(sqlalchemy.text("UPDATE global_inventory SET num_green_ml = :num"), {'num': num_green_ml})
 
     return [
             {
-                "potion_type": [100, 0, 0, 0],
-                "quantity": 5,
+                "potion_type": [0, 100, 0, 0],
+                "quantity": num_green_potion_add,
             }
         ]
 
