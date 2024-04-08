@@ -30,13 +30,18 @@ def post_deliver_barrels(barrels_delivered: list[Barrel], order_id: int):
 @router.post("/plan")
 def get_wholesale_purchase_plan(wholesale_catalog: list[Barrel]):
     num_green_potion = 0
+    num_green_ml = 0
     purchase_barrel = 0
     with db.engine.begin() as connection:
         result = connection.execute(sqlalchemy.text("SELECT * FROM global_inventory"))
         for row in result:
             num_green_potion = row[2]
+            num_green_ml = row[3]
     if num_green_potion < 10:
         purchase_barrel = 1
+        num_green_ml += 100
+        with db.engine.begin() as connection:
+            connection.execute(sqlalchemy.text("UPDATE global_inventory SET num_green_ml = :num"), {'num': num_green_ml})
     print(wholesale_catalog)
 
     return [
