@@ -15,6 +15,8 @@ def get_catalog():
         result = connection.execute(sqlalchemy.text("SELECT * FROM global_inventory"))
         for row in result:
             num_green_potion = row[2]
+    if num_green_potion == 0:
+        return []
 
     return [
             {
