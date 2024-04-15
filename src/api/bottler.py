@@ -18,22 +18,38 @@ class PotionInventory(BaseModel):
 @router.post("/deliver/{order_id}")
 def post_deliver_bottles(potions_delivered: list[PotionInventory], order_id: int):
     """ """
-    num_green_potion = 0
+    num_green_potions = 0
+    num_red_potions = 0
+    num_blue_potions = 0
     num_green_ml = 0
+    num_red_ml = 0
+    num_blue_ml = 0
     with db.engine.begin() as connection:
-        result = connection.execute(sqlalchemy.text("SELECT * FROM global_inventory"))
-        for row in result:
-            num_green_ml = row[3]
-            num_green_potion = row[2]
+        num_green_potions = connection.execute(sqlalchemy.text("SELECT num_green_potions FROM global_inventory")).scalar_one()
+        num_red_potions = connection.execute(sqlalchemy.text("SELECT num_red_potions FROM global_inventory")).scalar_one()
+        num_blue_potions = connection.execute(sqlalchemy.text("SELECT num_blue_potions FROM global_inventory")).scalar_one()
+        num_green_ml = connection.execute(sqlalchemy.text("SELECT num_green_ml FROM global_inventory")).scalar_one()
+        num_red_ml = connection.execute(sqlalchemy.text("SELECT num_red_ml FROM global_inventory")).scalar_one()
+        num_blue_ml = connection.execute(sqlalchemy.text("SELECT num_blue_ml FROM global_inventory")).scalar_one()
 
     for p in potions_delivered:
         if p.potion_type == [0, 100, 0, 0]:
-            num_green_potion += p.quantity
+            num_green_potions += p.quantity
             num_green_ml -= p.quantity * 100
+        if p.potion_type == [100, 0, 0, 0]:
+            num_red_potions += p.quantity
+            num_red_ml -= p.quantity * 100
+        if p.potion_type == [0, 0, 100, 0]:
+            num_blue_potions += p.quantity
+            num_blue_ml -= p.quantity * 100
 
     with db.engine.begin() as connection:
-        connection.execute(sqlalchemy.text("UPDATE global_inventory SET num_green_potions = :num"), {'num': num_green_potion})
+        connection.execute(sqlalchemy.text("UPDATE global_inventory SET num_green_potions = :num"), {'num': num_green_potions})
+        connection.execute(sqlalchemy.text("UPDATE global_inventory SET num_red_potions = :num"), {'num': num_red_potions})
+        connection.execute(sqlalchemy.text("UPDATE global_inventory SET num_blue_potions = :num"), {'num': num_blue_potions})
         connection.execute(sqlalchemy.text("UPDATE global_inventory SET num_green_ml = :num"), {'num': num_green_ml})
+        connection.execute(sqlalchemy.text("UPDATE global_inventory SET num_red_ml = :num"), {'num': num_red_ml})
+        connection.execute(sqlalchemy.text("UPDATE global_inventory SET num_blue_ml = :num"), {'num': num_blue_ml})
     print(f"potions delievered: {potions_delivered} order_id: {order_id}")
 
     return "OK"
@@ -50,19 +66,32 @@ def get_bottle_plan():
 
     # Initial logic: bottle all barrels into red potions.
     num_green_ml = 0
+    num_red_ml = 0
+    num_blue_ml = 0
     with db.engine.begin() as connection:
-        result = connection.execute(sqlalchemy.text("SELECT * FROM global_inventory"))
-        for row in result:
-            num_green_ml = row[3]
+        num_green_ml = connection.execute(sqlalchemy.text("SELECT num_green_ml FROM global_inventory")).scalar_one()
+        num_red_ml = connection.execute(sqlalchemy.text("SELECT num_red_ml FROM global_inventory")).scalar_one()
+        num_blue_ml = connection.execute(sqlalchemy.text("SELECT num_blue_ml FROM global_inventory")).scalar_one()
     num_green_potion_add = int(num_green_ml / 100)
-    if num_green_potion_add < 1:
-        return []
-    return [
-            {
-                "potion_type": [0, 100, 0, 0],
-                "quantity": num_green_potion_add,
-            }
-        ]
+    num_red_potion_add = int(num_red_ml / 100)
+    num_blue_potion_add = int(num_blue_ml / 100)
+    bottles = []
+    if num_green_potion_add > 0:
+        bottles.append({
+            "potion_type": [0, 100, 0, 0],
+            "quantity": num_green_potion_add,
+        })
+    if num_red_potion_add > 0:
+        bottles.append({
+            "potion_type": [100, 0, 0, 0],
+            "quantity": num_red_potion_add,
+        })
+    if num_blue_potion_add > 0:
+        bottles.append({
+            "potion_type": [0, 0, 100, 0],
+            "quantity": num_blue_potion_add,
+        })
+    return bottles
 
 if __name__ == "__main__":
     print(get_bottle_plan())

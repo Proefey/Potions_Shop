@@ -4,6 +4,7 @@ from src.api import auth
 from enum import Enum
 import sqlalchemy
 from src import database as db
+
 router = APIRouter(
     prefix="/carts",
     tags=["cart"],
@@ -82,21 +83,28 @@ def post_visits(visit_id: int, customers: list[Customer]):
 
     return "OK"
 
+temp_carts = {}
 
 @router.post("/")
 def create_cart(new_cart: Customer):
     """ """
-    return {"cart_id": 1}
+    new_cart_id = len(temp_carts) + 1
+    temp_carts[new_cart_id] = [0, 0, 0]
+    return {"cart_id": new_cart_id}
 
 
 class CartItem(BaseModel):
     quantity: int
 
-
 @router.post("/{cart_id}/items/{item_sku}")
 def set_item_quantity(cart_id: int, item_sku: str, cart_item: CartItem):
     """ """
-
+    if item_sku == "RED_POTION_0":
+        temp_carts[cart_id][0] += cart_item.quantity
+    elif item_sku == "GREEN_POTION_0":
+        temp_carts[cart_id][1] += cart_item.quantity
+    elif item_sku == "BLUE_POTION_0":
+        temp_carts[cart_id][2] += cart_item.quantity
     return "OK"
 
 
@@ -109,12 +117,24 @@ def checkout(cart_id: int, cart_checkout: CartCheckout):
     print(cart_checkout.payment)
     #Subtract Potions, Add Gold
     num_green_potions = 0
+    num_red_potions = 0
+    num_blue_potions = 0
     gold = 0
+    total = temp_carts[cart_id][0] + temp_carts[cart_id][1] + temp_carts[cart_id][2]
+    gold_diff = 40 * temp_carts[cart_id][0] + 50 * temp_carts[cart_id][1] + 60 * temp_carts[cart_id][2]
     with db.engine.begin() as connection:
         num_green_potions = connection.execute(sqlalchemy.text("SELECT num_green_potions FROM global_inventory")).scalar_one()
+        num_red_potions = connection.execute(sqlalchemy.text("SELECT num_red_potions FROM global_inventory")).scalar_one()
+        num_blue_potions = connection.execute(sqlalchemy.text("SELECT num_blue_potions FROM global_inventory")).scalar_one()
         gold = connection.execute(sqlalchemy.text("SELECT gold FROM global_inventory")).scalar_one()
-        if num_green_potions > 0:
-            connection.execute(sqlalchemy.text("UPDATE global_inventory SET num_green_potions = :num"), {'num': num_green_potions - 1})
-            connection.execute(sqlalchemy.text("UPDATE global_inventory SET gold = :num"), {'num': gold + 50})
+        num_red_potions -= temp_carts[cart_id][0]
+        num_green_potions -= temp_carts[cart_id][1]
+        num_blue_potions -= temp_carts[cart_id][2]
+        gold += gold_diff
+        connection.execute(sqlalchemy.text("UPDATE global_inventory SET num_green_potions = :num"), {'num': num_green_potions})
+        connection.execute(sqlalchemy.text("UPDATE global_inventory SET num_red_potions = :num"), {'num': num_red_potions})
+        connection.execute(sqlalchemy.text("UPDATE global_inventory SET num_blue_potions = :num"), {'num': num_blue_potions})
+        connection.execute(sqlalchemy.text("UPDATE global_inventory SET gold = :num"), {'num': gold})
+    del temp_carts[cart_id]
 
-    return {"total_potions_bought": 1, "total_gold_paid": 50}
+    return {"total_potions_bought": total, "total_gold_paid": gold_diff}
