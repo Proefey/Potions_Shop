@@ -22,30 +22,41 @@ class Barrel(BaseModel):
 @router.post("/deliver/{order_id}")
 def post_deliver_barrels(barrels_delivered: list[Barrel], order_id: int):
     """ """
-    #Add ML, SUB Gold
-    gold = 0
-    num_green_ml = 0
-    num_red_ml = 0
-    num_blue_ml = 0
-
+    print(barrels_delivered)
     with db.engine.begin() as connection:
-        gold = connection.execute(sqlalchemy.text("SELECT gold FROM global_inventory")).scalar_one()
-        num_green_ml = connection.execute(sqlalchemy.text("SELECT num_green_ml FROM global_inventory")).scalar_one()
-        num_red_ml = connection.execute(sqlalchemy.text("SELECT num_red_ml FROM global_inventory")).scalar_one()
-        num_blue_ml = connection.execute(sqlalchemy.text("SELECT num_blue_ml FROM global_inventory")).scalar_one()
+        result = connection.execute(sqlalchemy.text("SELECT num_red_ml, num_green_ml, num_blue_ml, num_dark_ml, gold FROM global_inventory")).fetchone()
+        num_red_ml = result[0]
+        num_green_ml = result[1]
+        num_blue_ml = result[2]
+        num_dark_ml = result[3]
+        gold = result[4]
 
+    print("Barrel Old ML: " + str(num_red_ml) + ":" + str(num_green_ml) + ":" + str(num_blue_ml) + ":" + str(num_dark_ml))
     for b in barrels_delivered:
-        gold -= b.price * b.quantity
-        num_red_ml += b.ml_per_barrel * b.potion_type[0] * b.quantity
-        num_green_ml += b.ml_per_barrel * b.potion_type[1] * b.quantity
-        num_blue_ml += b.ml_per_barrel * b.potion_type[2] * b.quantity
+        if b.potion_type == [1, 0, 0, 0]:
+            gold -= b.price * b.quantity
+            num_red_ml += b.ml_per_barrel * b.quantity
+        elif b.potion_type == [0, 1, 0, 0]:
+            gold -= b.price * b.quantity
+            num_green_ml += b.ml_per_barrel * b.quantity
+        elif b.potion_type == [0, 0, 1, 0]:
+            gold -= b.price * b.quantity
+            num_blue_ml += b.ml_per_barrel * b.quantity
+        elif b.potion_type == [0, 0, 0, 1]:
+            gold -= b.price * b.quantity
+            num_dark_ml += b.ml_per_barrel * b.quantity
+        else:
+            print("INVALID POTION TYPE")
+            print(b.potion_type)
+            return "OK"
 
     with db.engine.begin() as connection:
         connection.execute(sqlalchemy.text("UPDATE global_inventory SET gold = :num"), {'num': gold})
         connection.execute(sqlalchemy.text("UPDATE global_inventory SET num_green_ml = :num"), {'num': num_green_ml})
         connection.execute(sqlalchemy.text("UPDATE global_inventory SET num_red_ml = :num"), {'num': num_red_ml})
         connection.execute(sqlalchemy.text("UPDATE global_inventory SET num_blue_ml = :num"), {'num': num_blue_ml})
-
+        connection.execute(sqlalchemy.text("UPDATE global_inventory SET num_dark_ml = :num"), {'num': num_dark_ml})
+    print("Barrel New ML: " + str(num_red_ml) + ":" + str(num_green_ml) + ":" + str(num_blue_ml) + ":" + str(num_dark_ml))
     print(f"barrels delievered: {barrels_delivered} order_id: {order_id}")
 
     return "OK"
@@ -53,37 +64,45 @@ def post_deliver_barrels(barrels_delivered: list[Barrel], order_id: int):
 # Gets called once a day
 @router.post("/plan")
 def get_wholesale_purchase_plan(wholesale_catalog: list[Barrel]):
-    num_green_potions = 0
-    num_red_potions = 0
-    num_blue_potions = 0
-    gold = 0
-    
+    print(wholesale_catalog)
+    print("\n")
     #Get Values From Database
     with db.engine.begin() as connection:
-        num_green_potions = connection.execute(sqlalchemy.text("SELECT num_green_potions FROM global_inventory")).scalar_one()
-        num_red_potions = connection.execute(sqlalchemy.text("SELECT num_red_potions FROM global_inventory")).scalar_one()
-        num_blue_potions = connection.execute(sqlalchemy.text("SELECT num_blue_potions FROM global_inventory")).scalar_one()
-        gold = connection.execute(sqlalchemy.text("SELECT gold FROM global_inventory")).scalar_one()
-
+        result = connection.execute(sqlalchemy.text("SELECT num_red_ml, num_green_ml, num_blue_ml, num_dark_ml, gold FROM global_inventory")).fetchone()
+        num_red_ml = result[0]
+        num_green_ml = result[1]
+        num_blue_ml = result[2]
+        num_dark_ml = result[3]
+        gold = result[4]
+        min_threshold = connection.execute(sqlalchemy.text("SELECT min_threshold FROM magic")).scalar_one()
+    print(gold)
     #Determine Which Barrels To Buy
-    ToBuy = [(int) (num_red_potions < 10), (int) (num_green_potions < 10), (int) (num_blue_potions < 10), 0]
+    ToBuy = [(int) (num_red_ml < min_threshold), 
+             (int) (num_green_ml < min_threshold), 
+             (int) (num_blue_ml < min_threshold), 
+             (int) (num_dark_ml < min_threshold)]
+    
     if ToBuy == [0,0,0,0]: return []
 
     redBarrels = []
     greenBarrels = []
     blueBarrels = []
+    darkBarrels = []
     #Sort Catalog
     for b in wholesale_catalog:
         if b.quantity < 1: continue
-        elif b.potion_type[0] > 0 and ToBuy[0] > 0: redBarrels.append(b)
-        elif b.potion_type[1] > 0 and ToBuy[1] > 0: greenBarrels.append(b)
-        elif b.potion_type[2] > 0 and ToBuy[2] > 0: blueBarrels.append(b)
+        elif b.potion_type == [1,0,0,0] and ToBuy[0] > 0: redBarrels.append(b)
+        elif b.potion_type == [0,1,0,0] and ToBuy[1] > 0: greenBarrels.append(b)
+        elif b.potion_type == [0,0,1,0] and ToBuy[2] > 0: blueBarrels.append(b)
+        elif b.potion_type == [0,0,0,1] and ToBuy[3] > 0: darkBarrels.append(b)
     
     #Sort By Price
     redBarrels = sorted(redBarrels, key=lambda k: k.price)
     greenBarrels = sorted(greenBarrels, key=lambda k: k.price)
     blueBarrels = sorted(blueBarrels, key=lambda k: k.price)
+    darkBarrels = sorted(darkBarrels, key=lambda k: k.price)
     purchase = []
+
     #Buy one of the cheapest barrel necessary for each potion that needs it. 
     if ToBuy[0] == 1 and len(redBarrels) > 0 and gold >= redBarrels[0].price: 
         purchase.append({
@@ -103,9 +122,15 @@ def get_wholesale_purchase_plan(wholesale_catalog: list[Barrel]):
             "quantity": 1,
         })
         gold -= blueBarrels[0].price
+    if ToBuy[3] == 1 and len(darkBarrels) > 0 and gold >= darkBarrels[0].price: 
+        purchase.append({
+            "sku": darkBarrels[0].sku,
+            "quantity": 1,
+        })
+        gold -= darkBarrels[0].price
 
     #Objectively Unnecessarily Complicated Barrel Logic
-    if num_red_potions <= num_green_potions and num_red_potions <= num_blue_potions and ToBuy[0] == 1:
+    if num_red_ml <= num_green_ml and num_red_ml <= num_blue_ml and num_red_ml <= num_dark_ml and ToBuy[0] == 1:
         maxsku = ""
         for x in range(1, len(redBarrels)):
             if gold >= redBarrels[x].price:
@@ -115,7 +140,7 @@ def get_wholesale_purchase_plan(wholesale_catalog: list[Barrel]):
                 "sku": maxsku,
                 "quantity": 1,
             })
-    elif num_green_potions <= num_blue_potions and ToBuy[1] == 1:
+    elif num_green_ml <= num_blue_ml and num_green_ml <= num_dark_ml and ToBuy[1] == 1:
         maxsku = ""
         for x in range(1, len(greenBarrels)):
             if gold >= greenBarrels[x].price:
@@ -125,7 +150,7 @@ def get_wholesale_purchase_plan(wholesale_catalog: list[Barrel]):
                 "sku": maxsku,
                 "quantity": 1,
             })
-    elif ToBuy[2] == 1:
+    elif num_blue_ml <= num_dark_ml and ToBuy[2] == 1:
         maxsku = ""
         for x in range(1, len(blueBarrels)):
             if gold >= blueBarrels[x].price:
@@ -135,5 +160,17 @@ def get_wholesale_purchase_plan(wholesale_catalog: list[Barrel]):
                 "sku": maxsku,
                 "quantity": 1,
             })
+    elif ToBuy[3] == 1:
+        maxsku = ""
+        for x in range(1, len(darkBarrels)):
+            if gold >= darkBarrels[x].price:
+                maxsku = darkBarrels[x].sku
+        if len(maxsku) > 0:
+            purchase.append({
+                "sku": maxsku,
+                "quantity": 1,
+            })
 
+    print("PURCHASED BARRELS: \n")
+    print(purchase)
     return purchase
