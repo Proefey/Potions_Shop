@@ -35,6 +35,7 @@ def get_inventory():
         potion_count = connection.execute(
                     sqlalchemy.text("SELECT sum(quantity) FROM ledger WHERE potion_id IS NOT NULL")
                 ).scalar_one()
+        if potion_count is None: potion_count = 0
     total_barrel = num_red_ml + num_green_ml + num_blue_ml + num_dark_ml
 
     return {"number_of_potions": potion_count, "ml_in_barrels": total_barrel, "gold": gold}
