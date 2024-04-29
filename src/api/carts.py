@@ -129,17 +129,29 @@ def checkout(cart_id: int, cart_checkout: CartCheckout):
     total = 0
     gold_diff = 0
     print("CHECKOUT CART: " + str(cart_id))
+    order_desc = "CART CHECKOUT DELIVERERED ID: " + str(cart_id)
     with db.engine.begin() as connection:
+        check = connection.execute(sqlalchemy.text("SELECT 1 FROM transactions where description = :desc LIMIT 1"), {'desc': order_desc})
+        #Prevent Re-ordering
+        if check.rowcount > 0:
+            print("CONFLICT DETECTED, DESC: " + order_desc)
+            return "OK"
         result = connection.execute(sqlalchemy.text("SELECT quantity, potion_id FROM cart_items WHERE cart_id = :id"), {'id': cart_id}).fetchall()
-        for row in result:
-            total += row[0]
-            result2 = connection.execute(sqlalchemy.text("SELECT sku, price FROM potions WHERE id = :id"), {'id': row[1]}).fetchone()
-            print("CHECKOUT ITEM: " + str(result2[0]) + ", QUANTITY:" + str(row[0]))
-            gold_diff += result2[1] * row[0]
-            connection.execute(sqlalchemy.text("UPDATE potions SET inventory = inventory - :num WHERE id = :id"), {'num': row[0], 'id': row[1]})  
+        new_id = connection.execute(sqlalchemy.text("INSERT INTO transactions (description) VALUES (:desc) RETURNING id;"), {'desc': order_desc}).scalar_one()
+        print("TRANSACTION RECORDED WITH ID: " + str(new_id))
+        for quantity, potion_id in result:
+            total += quantity
+            sku, price = connection.execute(sqlalchemy.text("SELECT sku, price FROM potions WHERE id = :id"), {'id': potion_id}).fetchone()
+            print("CHECKOUT ITEM: " + str(sku) + ", QUANTITY:" + str(quantity))
+            gold_diff += price * quantity
+            connection.execute(sqlalchemy.text("INSERT INTO ledger (potion_id, quantity, transaction_id) " + 
+                                        "VALUES (:potion_id, :quantity, :new_id)"), 
+                        {'new_id': new_id, 'potion_id': potion_id, 'quantity': quantity * -1})
             connection.execute(sqlalchemy.text("DELETE FROM cart_items WHERE cart_id = :id"), {'id': cart_id})
-            connection.execute(sqlalchemy.text("DELETE FROM carts WHERE id = :id"), {'id': cart_id})
+            #connection.execute(sqlalchemy.text("DELETE FROM carts WHERE id = :id"), {'id': cart_id})
 
-        connection.execute(sqlalchemy.text("UPDATE global_inventory SET gold = gold + :num"), {'num': gold_diff})
+        connection.execute(sqlalchemy.text("INSERT INTO ledger (field_name, quantity, transaction_id) " + 
+                                        "VALUES (:field_name, :quantity, :new_id)"), 
+                        {'new_id': new_id, 'field_name': "gold", 'quantity': gold_diff})
 
     return {"total_potions_bought": total, "total_gold_paid": gold_diff}

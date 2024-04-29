@@ -22,15 +22,19 @@ def get_catalog():
     """
     new_catalog = []
     with db.engine.begin() as connection:
-        result2 = connection.execute(sqlalchemy.text("SELECT id, inventory, num_red_ml, num_green_ml, num_blue_ml, num_dark_ml, sku, price FROM potions")).fetchall()
-        for row in result2:
-            if row[1] > 0:
+        result2 = connection.execute(sqlalchemy.text("SELECT id, num_red_ml, num_green_ml, num_blue_ml, num_dark_ml, sku, price FROM potions")).fetchall()
+        potion_to_inv = connection.execute(sqlalchemy.text("SELECT potion_id, sum(quantity) FROM ledger GROUP BY potion_id")).fetchall()
+        potion_dict = {p[0]: p[1] for p in potion_to_inv}
+        print(potion_dict)
+        for id, num_red_ml, num_green_ml, num_blue_ml, num_dark_ml, sku, price in result2:
+            inventory = potion_dict.get(id)
+            if inventory is not None and inventory > 0:
                 new_catalog.append({
-                    "sku": row[6],
-                    "name": row[6],
-                    "quantity": row[1],
-                    "price": row[7],
-                    "potion_type": [row[2], row[3], row[4], row[5]],
+                    "sku": sku,
+                    "name": sku,
+                    "quantity": inventory,
+                    "price": price,
+                    "potion_type": [num_red_ml, num_green_ml, num_blue_ml, num_dark_ml],
                 })
 
     return new_catalog
