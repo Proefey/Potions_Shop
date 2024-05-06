@@ -54,7 +54,52 @@ def search_orders(
     time is 5 total line items.
     """
     print(search_page)
+    
+    ORDER_STR = " ORDER BY " + sort_col + " " + sort_order + ", cart_items.id DESC"
+    NAME_FILTER = ""
+    ITEM_FILTER = ""
+    if(len(customer_name) > 0): NAME_FILTER = " AND carts.customer = \'" + customer_name + "\'"
+    if(len(potion_sku) > 0): ITEM_FILTER = " WHERE potion_sku = \'" + potion_sku + "\'"
+    offset = 0
+    previous_str = ""
+    next_str = ""
+    if search_page.isnumeric():
+        offset = int(search_page)
+        if offset > 4:
+            previous_str = str(offset - 5)
+    with db.engine.connect() as conn:
+        result = conn.execute(sqlalchemy.text("SELECT cart_items.id, potion_sku as item_sku, quantity as line_item_total, carts.customer as customer_name, transactions.created_at as timestamp from cart_items"
+                                              +" JOIN carts ON carts.id = cart_items.cart_id" + NAME_FILTER
+                                              +" JOIN transactions on transactions.cart_id = cart_items.cart_id"
+                                              + ITEM_FILTER
+                                              + ORDER_STR
+                                              +" OFFSET :offset")
+                                              ,{'offset': offset})
+        total_rows = result.rowcount
+        print(total_rows)
+        if total_rows > 5:
+            next_str = str(offset + 5)
+        json = []
+        count = 0
+        for row in result:
+            if count > 4: break
+            json.append(
+                {
+                    "line_item_id": row.id,
+                    "item_sku": row.item_sku,
+                    "customer_name": row.customer_name,
+                    "line_item_total": row.line_item_total,
+                    "timestamp": row.timestamp,
+                }
+            )
+            count += 1
 
+    return {
+        "previous": previous_str,
+        "next": next_str,
+        "results": json
+    }
+'''
     return {
         "previous": "",
         "next": "",
@@ -68,7 +113,7 @@ def search_orders(
             }
         ],
     }
-
+'''
 
 class Customer(BaseModel):
     customer_name: str
@@ -135,7 +180,7 @@ def checkout(cart_id: int, cart_checkout: CartCheckout):
             print("CONFLICT DETECTED, DESC: " + order_desc)
             return "OK"
         result = connection.execute(sqlalchemy.text("SELECT quantity, potion_sku FROM cart_items WHERE cart_id = :id"), {'id': cart_id}).fetchall()
-        new_id = connection.execute(sqlalchemy.text("INSERT INTO transactions (description) VALUES (:desc) RETURNING id;"), {'desc': order_desc}).scalar_one()
+        new_id = connection.execute(sqlalchemy.text("INSERT INTO transactions (description, cart_id) VALUES (:desc, :cart_id) RETURNING id;"), {'desc': order_desc, 'cart_id': cart_id}).scalar_one()
         print("TRANSACTION RECORDED WITH ID: " + str(new_id))
         for quantity, potion_sku in result:
             total += quantity
