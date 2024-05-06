@@ -105,15 +105,12 @@ def set_item_quantity(cart_id: int, item_sku: str, cart_item: CartItem):
         if result.rowcount < 1:
             print("CART_ID NOT FOUND: " + str(cart_id))
             return "OK"
-        result2 = connection.execute(sqlalchemy.text("SELECT inventory FROM potions WHERE sku = :sku LIMIT 1"), {'sku': item_sku})
-        if result2.rowcount < 1:
-            print("ITEM_SKU NOT FOUND: " + str(item_sku))
-            return "OK"
-        inventory = result2.fetchone()[0]
-        if inventory < cart_item.quantity:
+        sku, inventory = connection.execute(sqlalchemy.text("SELECT potion_sku, COALESCE(SUM(quantity), 0) as inventory from potion_ledger where potion_sku = :item_sku GROUP BY potion_sku"), {'item_sku': item_sku}).fetchone()
+        print("FOUND POTION SKU: " + str(sku) + ", INVENTORY: " + str(inventory))
+        if inventory < cart_item.quantity or inventory < 1 or cart_item.quantity < 1:
             print("INVALID NUMBER OF POTIONS ADDED TO CART: " + str(cart_item.quantity) + ", IN INVENTORY: " + str(inventory))
             return "OK"
-        connection.execute(sqlalchemy.text("INSERT INTO cart_items (cart_id, quantity, potion_id) SELECT :cart_id, :quantity, potions.id FROM potions WHERE potions.sku = :item_sku"), {'cart_id': cart_id, 'quantity': cart_item.quantity, 'item_sku': item_sku})
+        connection.execute(sqlalchemy.text("INSERT INTO cart_items (cart_id, quantity, potion_sku) SELECT :cart_id, :quantity, :item_sku"), {'cart_id': cart_id, 'quantity': cart_item.quantity, 'item_sku': item_sku})
         print("ADDED " + str(cart_item.quantity) + " OF " + str(item_sku) + " TO " + str(cart_id))
     return "OK"
 
@@ -136,21 +133,21 @@ def checkout(cart_id: int, cart_checkout: CartCheckout):
         if check.rowcount > 0:
             print("CONFLICT DETECTED, DESC: " + order_desc)
             return "OK"
-        result = connection.execute(sqlalchemy.text("SELECT quantity, potion_id FROM cart_items WHERE cart_id = :id"), {'id': cart_id}).fetchall()
+        result = connection.execute(sqlalchemy.text("SELECT quantity, potion_sku FROM cart_items WHERE cart_id = :id"), {'id': cart_id}).fetchall()
         new_id = connection.execute(sqlalchemy.text("INSERT INTO transactions (description) VALUES (:desc) RETURNING id;"), {'desc': order_desc}).scalar_one()
         print("TRANSACTION RECORDED WITH ID: " + str(new_id))
-        for quantity, potion_id in result:
+        for quantity, potion_sku in result:
             total += quantity
-            sku, price = connection.execute(sqlalchemy.text("SELECT sku, price FROM potions WHERE id = :id"), {'id': potion_id}).fetchone()
-            print("CHECKOUT ITEM: " + str(sku) + ", QUANTITY:" + str(quantity))
+            price = connection.execute(sqlalchemy.text("SELECT price FROM potions WHERE sku = :sku"), {'sku': potion_sku}).scalar_one()
+            print("CHECKOUT ITEM: " + str(potion_sku) + ", QUANTITY:" + str(quantity))
             gold_diff += price * quantity
-            connection.execute(sqlalchemy.text("INSERT INTO ledger (potion_id, quantity, transaction_id) " + 
-                                        "VALUES (:potion_id, :quantity, :new_id)"), 
-                        {'new_id': new_id, 'potion_id': potion_id, 'quantity': quantity * -1})
-            connection.execute(sqlalchemy.text("DELETE FROM cart_items WHERE cart_id = :id"), {'id': cart_id})
+            connection.execute(sqlalchemy.text("INSERT INTO potion_ledger (potion_sku, quantity, transaction_id) " + 
+                                        "VALUES (:potion_sku, :quantity, :new_id)"), 
+                        {'new_id': new_id, 'potion_sku': potion_sku, 'quantity': quantity * -1})
+            #connection.execute(sqlalchemy.text("DELETE FROM cart_items WHERE cart_id = :id"), {'id': cart_id})
             #connection.execute(sqlalchemy.text("DELETE FROM carts WHERE id = :id"), {'id': cart_id})
 
-        connection.execute(sqlalchemy.text("INSERT INTO ledger (field_name, quantity, transaction_id) " + 
+        connection.execute(sqlalchemy.text("INSERT INTO general_ledger (field_name, quantity, transaction_id) " + 
                                         "VALUES (:field_name, :quantity, :new_id)"), 
                         {'new_id': new_id, 'field_name': "gold", 'quantity': gold_diff})
 

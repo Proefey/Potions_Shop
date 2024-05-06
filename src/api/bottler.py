@@ -19,69 +19,81 @@ class PotionInventory(BaseModel):
 def post_deliver_bottles(potions_delivered: list[PotionInventory], order_id: int):
     """ """
     order_desc = "BOTTLE DELIVERERED ID: " + str(order_id) 
+    potion_dict = []
     with db.engine.begin() as connection:
         check = connection.execute(sqlalchemy.text("SELECT 1 FROM transactions where description = :desc LIMIT 1"), {'desc': order_desc})
         #Prevent Re-ordering
         if check.rowcount > 0:
             print("CONFLICT DETECTED, DESC: " + order_desc)
             return "OK"
+        
         new_id = connection.execute(sqlalchemy.text("INSERT INTO transactions (description) VALUES (:desc) RETURNING id;"), {'desc': order_desc}).scalar_one()
         print("TRANSACTION RECORDED WITH ID: " + str(new_id))
-        result = connection.execute(
-            sqlalchemy.text("SELECT field_name, sum(quantity) FROM ledger GROUP BY field_name")
-            )
-        num_red_ml = 0
-        num_green_ml = 0
-        num_blue_ml = 0
-        num_dark_ml = 0
-        for row in result:
-            if(row[0] == "num_red_ml"): num_red_ml = row[1]
-            elif(row[0] == "num_green_ml"): num_green_ml = row[1]
-            elif(row[0] == "num_blue_ml"): num_blue_ml = row[1]
-            elif(row[0] == "num_dark_ml"): num_dark_ml = row[1]
-            else:
-                print("UNKOWN FIELD: " + str(row[0]))
-        print(potions_delivered)
-        print("Bottle Old ML: " + str(num_red_ml) + ":" + str(num_green_ml) + ":" + str(num_blue_ml) + ":" + str(num_dark_ml))
-        red_diff = 0
-        green_diff = 0
-        blue_diff = 0
-        dark_diff = 0
-        for p in potions_delivered:
-            result = connection.execute(sqlalchemy.text("SELECT id, sku FROM potions WHERE num_red_ml = :num0 AND num_green_ml = :num1 AND num_blue_ml = :num2 AND num_dark_ml = :num3"), {'num0': p.potion_type[0], 'num1': p.potion_type[1], 'num2': p.potion_type[2], 'num3': p.potion_type[3]})
-            if result is not None and result.rowcount > 0:
-                potion_tuple = result.fetchone()
-                potion_id = potion_tuple[0]
-                new_sku = potion_tuple[1]
-                print("Updating Existing POTION: " + str(new_sku) + " BY: " + str(p.quantity))
-                red_diff -= p.potion_type[0] * p.quantity
-                green_diff -= p.potion_type[1] * p.quantity
-                blue_diff -= p.potion_type[2] * p.quantity
-                dark_diff -= p.potion_type[3] * p.quantity
-                connection.execute(sqlalchemy.text("INSERT INTO ledger (potion_id, quantity, transaction_id) " + 
-                                        "VALUES (:potion_id, :quantity, :new_id)"), 
-                        {'new_id': new_id, 'potion_id': potion_id, 'quantity': p.quantity})
-            else:
-                print("UNKNOWN POTION" + str(p.potion_type) + "\n")
-                
-        connection.execute(sqlalchemy.text("INSERT INTO ledger (field_name, quantity, transaction_id) " + 
-                                        "VALUES ('num_red_ml', :red, :new_id), ('num_green_ml', :green, :new_id),"
-                                        + "('num_blue_ml', :blue, :new_id), ('num_dark_ml', :dark, :new_id)"), 
-                        {'new_id': new_id, 'red': red_diff, 'green': green_diff, 'blue': blue_diff, 'dark': dark_diff})
-    
+
+        potion_info = connection.execute(sqlalchemy.text("SELECT sku, num_red_ml, num_green_ml, num_blue_ml, num_dark_ml from potions")).fetchall()
+        for sku, red, green, blue, dark in potion_info: 
+            potion_dict.append((sku, [red, green, blue, dark]))
+
+        general = connection.execute(sqlalchemy.text("SELECT field_name, sum(quantity) FROM general_ledger GROUP BY field_name")).fetchall()
+        for entry in general:
+            if(entry[0] == "num_red_ml"): num_red_ml = entry[1]
+            elif(entry[0] == "num_green_ml"): num_green_ml = entry[1]
+            elif(entry[0] == "num_blue_ml"): num_blue_ml = entry[1]
+            elif(entry[0] == "num_dark_ml"): num_dark_ml = entry[1]
+            elif(entry[0] != "gold"): print("UNKOWN FIELD: " + str(entry[0]))
+
+    print(potions_delivered)
+    print(potion_dict)
+    print("Bottle Old ML: " + str(num_red_ml) + ":" + str(num_green_ml) + ":" + str(num_blue_ml) + ":" + str(num_dark_ml))
+    red_diff = 0
+    green_diff = 0
+    blue_diff = 0
+    dark_diff = 0
+    new_potions = []
+    for p in potions_delivered:
+        new_sku = None
+        for p1 in potion_dict:
+            if p.potion_type == p1[1]:
+                new_sku = p1[0]
+        if new_sku is None:
+            print("Unknown Potion: " + str(p))
+            continue
+        print("Updating Existing POTION: " + str(new_sku) + " BY: " + str(p.quantity))
+        red_diff -= p.potion_type[0] * p.quantity
+        green_diff -= p.potion_type[1] * p.quantity
+        blue_diff -= p.potion_type[2] * p.quantity
+        dark_diff -= p.potion_type[3] * p.quantity
+        new_potions.append([new_sku, p.quantity, new_id])
+    print(new_potions)
+    if(len(new_potions) < 1): return "OK"
+
+    newstr = "INSERT INTO potion_ledger (potion_sku, quantity, transaction_id) VALUES"
+    for potion in new_potions:
+        newstr += " ('%s', %d, %d)," % (potion[0], potion[1], potion[2])
+    newstr = newstr[:-1]
+    print(newstr)
+
+    with db.engine.begin() as connection:
+        
+        connection.execute(sqlalchemy.text("INSERT INTO general_ledger (field_name, quantity, transaction_id) " + 
+                                            "VALUES ('num_red_ml', :red, :new_id), ('num_green_ml', :green, :new_id),"
+                                            + "('num_blue_ml', :blue, :new_id), ('num_dark_ml', :dark, :new_id)"), 
+                            {'new_id': new_id, 'red': red_diff, 'green': green_diff, 'blue': blue_diff, 'dark': dark_diff})
+        connection.execute(sqlalchemy.text(newstr))
+        
     print("ML USED: " + str(red_diff) + ":" + str(green_diff) + ":" + str(blue_diff) + ":" + str(dark_diff))
     print(f"potions delievered: {potions_delivered} order_id: {order_id}")
 
     return "OK"
 
 class Potion_Plan:
-    def __init__(self, id, inv, type):
-        self.id = id
+    def __init__(self, sku, inv, type):
+        self.sku = sku
         self.inventory = inv
         self.potion_type = type
     def __str__(self):
-        return "ID: " + str(self.id) + ", QUANTITY:" + str(self.inventory) + "POTION: " + str(self.potion_type[0]) + ":" + str(self.potion_type[1]) + ":" + str(self.potion_type[2]) + ":" + str(self.potion_type[3])
-    id: int
+        return "SKU: " + str(self.sku) + ", QUANTITY:" + str(self.inventory) + ", POTION: " + str(self.potion_type[0]) + ":" + str(self.potion_type[1]) + ":" + str(self.potion_type[2]) + ":" + str(self.potion_type[3])
+    sku: str
     inventory: int
     potion_type: list[int]
 
@@ -97,35 +109,29 @@ def get_bottle_plan():
 
     # Initial logic: bottle all barrels into red potions.
     potions = []
+    num_red_ml = 0
+    num_green_ml = 0
+    num_blue_ml = 0
+    num_dark_ml = 0
+    potion_dict = []
     with db.engine.begin() as connection:
         min_potions = connection.execute(sqlalchemy.text("SELECT min_potions FROM magic")).scalar_one()
-        result = connection.execute(
-            sqlalchemy.text("SELECT field_name, sum(quantity) FROM ledger GROUP BY field_name")
-            )
-        num_red_ml = 0
-        num_green_ml = 0
-        num_blue_ml = 0
-        num_dark_ml = 0
-        for row in result:
-            if(row[0] == "num_red_ml"): num_red_ml = row[1]
-            elif(row[0] == "num_green_ml"): num_green_ml = row[1]
-            elif(row[0] == "num_blue_ml"): num_blue_ml = row[1]
-            elif(row[0] == "num_dark_ml"): num_dark_ml = row[1]
-            else:
-                print("UNKNOWN FIELD: " + str(row[0]))
+        general = connection.execute(sqlalchemy.text("SELECT field_name, sum(quantity) FROM general_ledger GROUP BY field_name")).fetchall()
+        for entry in general:
+            if(entry[0] == "num_red_ml"): num_red_ml = entry[1]
+            elif(entry[0] == "num_green_ml"): num_green_ml = entry[1]
+            elif(entry[0] == "num_blue_ml"): num_blue_ml = entry[1]
+            elif(entry[0] == "num_dark_ml"): num_dark_ml = entry[1]
+            elif(entry[0] != "gold"): print("UNKNOWN FIELD: " + str(entry[0]))
         print("Bottle Old ML: " + str(num_red_ml) + ":" + str(num_green_ml) + ":" + str(num_blue_ml) + ":" + str(num_dark_ml))
 
-        result2 = connection.execute(sqlalchemy.text("SELECT id, num_red_ml, num_green_ml, num_blue_ml, num_dark_ml FROM potions")).fetchall()
-        potion_to_inv = connection.execute(sqlalchemy.text("SELECT potion_id, sum(quantity) FROM ledger GROUP BY potion_id")).fetchall()
-        potion_dict = {p[0]: p[1] for p in potion_to_inv}
-        print(potion_dict)
-        for id, red, green, blue, dark in result2:
-            inventory = potion_dict.get(id)
+        potion_info = connection.execute(sqlalchemy.text("SELECT sku, COALESCE(SUM(potion_ledger.quantity), 0) as inventory,num_red_ml, num_green_ml, num_blue_ml, num_dark_ml from potions LEFT JOIN potion_ledger ON potion_ledger.potion_sku = sku GROUP BY sku")).fetchall()
+        for sku, inventory, red, green, blue, dark in potion_info: 
             if inventory is None: inventory = 0
             if inventory < min_potions:
-                potions.append(Potion_Plan(id, inventory, [red, green, blue, dark]))
+                potions.append(Potion_Plan(sku, inventory, [red, green, blue, dark]))
                 print(potions[len(potions) - 1])
-
+        print(potion_dict)
     print("Bottle Plan Old ML: " + str(num_red_ml) + ":" + str(num_green_ml) + ":" + str(num_blue_ml) + ":" + str(num_dark_ml))
     bottles = []
     if len(potions) < 1:

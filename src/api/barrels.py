@@ -25,26 +25,18 @@ def post_deliver_barrels(barrels_delivered: list[Barrel], order_id: int):
     order_desc = "BARREL DELIVERERED ID: " + str(order_id) 
     with db.engine.begin() as connection:
         check = connection.execute(sqlalchemy.text("SELECT 1 FROM transactions where description = :desc LIMIT 1"), {'desc': order_desc})
-        #Prevent Re-ordering
         if check.rowcount > 0:
             print("CONFLICT DETECTED, DESC: " + order_desc)
             return "OK"
-        result = connection.execute(
-            sqlalchemy.text("SELECT field_name, sum(quantity) FROM ledger GROUP BY field_name")
-            )
-    num_red_ml = 0
-    num_green_ml = 0
-    num_blue_ml = 0
-    num_dark_ml = 0
-    gold = 0
-    for row in result:
-        if(row[0] == "num_red_ml"): num_red_ml = row[1]
-        elif(row[0] == "num_green_ml"): num_green_ml = row[1]
-        elif(row[0] == "num_blue_ml"): num_blue_ml = row[1]
-        elif(row[0] == "num_dark_ml"): num_dark_ml = row[1]
-        elif(row[0] == "gold"): gold = row[1]
-        else:
-            print("UNKNOWN FIELD: " + str(row[0]))
+        general = connection.execute(sqlalchemy.text("SELECT field_name, sum(quantity) FROM general_ledger GROUP BY field_name")).fetchall()
+        for entry in general:
+            if(entry[0] == "num_red_ml"): num_red_ml = entry[1]
+            elif(entry[0] == "num_green_ml"): num_green_ml = entry[1]
+            elif(entry[0] == "num_blue_ml"): num_blue_ml = entry[1]
+            elif(entry[0] == "num_dark_ml"): num_dark_ml = entry[1]
+            elif(entry[0] == "gold"): gold = entry[1]
+            else: print("UNKOWN FIELD: " + str(entry[0]))
+
     print(barrels_delivered)
     print("Barrel Old ML: " + str(num_red_ml) + ":" + str(num_green_ml) + ":" + str(num_blue_ml) + ":" + str(num_dark_ml))
     print("Old Gold: " + str(gold))
@@ -67,7 +59,7 @@ def post_deliver_barrels(barrels_delivered: list[Barrel], order_id: int):
             gold_diff -= b.price * b.quantity
             dark_diff += b.ml_per_barrel * b.quantity
         else:
-            print("INVALID POTION TYPE")
+            print("INVALID BARREL TYPE")
             print(b.potion_type)
             return "OK"
 
@@ -75,7 +67,7 @@ def post_deliver_barrels(barrels_delivered: list[Barrel], order_id: int):
         #Add Transaction
         new_id = connection.execute(sqlalchemy.text("INSERT INTO transactions (description) VALUES (:desc) RETURNING id;"), {'desc': order_desc}).scalar_one()
         print("TRANSACTION RECORDED WITH ID: " + str(new_id))
-        connection.execute(sqlalchemy.text("INSERT INTO ledger (field_name, quantity, transaction_id) " + 
+        connection.execute(sqlalchemy.text("INSERT INTO general_ledger (field_name, quantity, transaction_id) " + 
                                            "VALUES ('gold', :g, :new_id), ('num_red_ml', :red, :new_id), ('num_green_ml', :green, :new_id),"
                                            + "('num_blue_ml', :blue, :new_id), ('num_dark_ml', :dark, :new_id)"), 
                            {'new_id': new_id, 'g': gold_diff, 'red': red_diff, 'green': green_diff, 'blue': blue_diff, 'dark': dark_diff})
@@ -92,25 +84,16 @@ def get_wholesale_purchase_plan(wholesale_catalog: list[Barrel]):
     #Get Values From Database
     with db.engine.begin() as connection:
         min_threshold = connection.execute(sqlalchemy.text("SELECT min_threshold FROM magic")).scalar_one()
-        result = connection.execute(
-            sqlalchemy.text("SELECT field_name, sum(quantity) FROM ledger GROUP BY field_name")
-            )
-    num_red_ml = 0
-    num_green_ml = 0
-    num_blue_ml = 0
-    num_dark_ml = 0
-    gold = 0
-    for row in result:
-        if(row[0] == "num_red_ml"): num_red_ml = row[1]
-        elif(row[0] == "num_green_ml"): num_green_ml = row[1]
-        elif(row[0] == "num_blue_ml"): num_blue_ml = row[1]
-        elif(row[0] == "num_dark_ml"): num_dark_ml = row[1]
-        elif(row[0] == "gold"): gold = row[1]
-        else:
-            print("UNKNOWN FIELD: " + str(row[0]))
+        general = connection.execute(sqlalchemy.text("SELECT field_name, sum(quantity) FROM general_ledger GROUP BY field_name")).fetchall()
+        for entry in general:
+            if(entry[0] == "num_red_ml"): num_red_ml = entry[1]
+            elif(entry[0] == "num_green_ml"): num_green_ml = entry[1]
+            elif(entry[0] == "num_blue_ml"): num_blue_ml = entry[1]
+            elif(entry[0] == "num_dark_ml"): num_dark_ml = entry[1]
+            elif(entry[0] == "gold"): gold = entry[1]
+            else: print("UNKOWN FIELD: " + str(entry[0]))
     print("Gold:" + str(gold))
     print("Barrel Old ML: " + str(num_red_ml) + ":" + str(num_green_ml) + ":" + str(num_blue_ml) + ":" + str(num_dark_ml))
-    
     #Determine Which Barrels To Buy
     ToBuy = [(int) (num_red_ml < min_threshold), 
              (int) (num_green_ml < min_threshold), 

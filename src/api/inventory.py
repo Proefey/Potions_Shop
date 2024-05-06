@@ -15,25 +15,17 @@ router = APIRouter(
 def get_inventory():
     """ """
     with db.engine.begin() as connection:
-        result = connection.execute(
-                    sqlalchemy.text("SELECT field_name, sum(quantity) FROM ledger GROUP BY field_name")
-                    )
-        num_red_ml = 0
-        num_green_ml = 0
-        num_blue_ml = 0
-        num_dark_ml = 0
-        gold = 0
-        for row in result:
-            if(row[0] == "num_red_ml"): num_red_ml = row[1]
-            elif(row[0] == "num_green_ml"): num_green_ml = row[1]
-            elif(row[0] == "num_blue_ml"): num_blue_ml = row[1]
-            elif(row[0] == "num_dark_ml"): num_dark_ml = row[1]
-            elif(row[0] == "gold"): gold = row[1]
-            else:
-                print("UNKOWN FIELD: " + str(row[0]))
+        general = connection.execute(sqlalchemy.text("SELECT field_name, sum(quantity) FROM general_ledger GROUP BY field_name")).fetchall()
+        for entry in general:
+            if(entry[0] == "num_red_ml"): num_red_ml = entry[1]
+            elif(entry[0] == "num_green_ml"): num_green_ml = entry[1]
+            elif(entry[0] == "num_blue_ml"): num_blue_ml = entry[1]
+            elif(entry[0] == "num_dark_ml"): num_dark_ml = entry[1]
+            elif(entry[0] == "gold"): gold = entry[1]
+            else: print("UNKOWN FIELD: " + str(entry[0]))
         potion_count = 0
         potion_count = connection.execute(
-                    sqlalchemy.text("SELECT sum(quantity) FROM ledger WHERE potion_id IS NOT NULL")
+                    sqlalchemy.text("SELECT sum(quantity) FROM potion_ledger")
                 ).scalar_one()
         if potion_count is None: potion_count = 0
     total_barrel = num_red_ml + num_green_ml + num_blue_ml + num_dark_ml
