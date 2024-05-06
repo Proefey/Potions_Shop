@@ -53,6 +53,7 @@ def search_orders(
     Your results must be paginated, the max results you can return at any
     time is 5 total line items.
     """
+    print(search_page)
 
     return {
         "previous": "",
